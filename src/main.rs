@@ -1,31 +1,32 @@
-use std::{fs, io};
+use std::{fs, io, thread, time};
 use std::cmp::max;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufWriter;
 use rayon::prelude::*;
-use std::ops::Deref;
-use std::{thread, time};
-use std::borrow::BorrowMut;
-use std::time::Duration;
 
 
 fn main() -> io::Result<()> {
-    let mut entries = fs::read_dir("./Lapse_002")?
+    let num_threads = num_cpus::get();
+    println!("System has {} logical cores. Using the same number of worker threads", num_threads);
+
+    let mut entries = fs::read_dir("./Lapse_001")?
         .map(|res| res.map(|e| e.path()))
         .collect::<Result<Vec<_>, io::Error>>()?;
-    println!("Found {} files in target folder. Reading...", entries.len());
-    let result = Arc::new(Mutex::new(vec![]));
-    let mut done = Arc::new(Box::new(true));
 
+    println!("Found {} files in target folder. Reading...", entries.len());
+
+    let result = Arc::new(Mutex::new(vec![]));
+    let done = Arc::new(AtomicBool::new(false));
     let mut thread_handles = vec![];
-    for _ in 0..12 {
-        let mut q = Arc::clone(&result);
+
+    for _ in 0..num_threads {
+        let q = Arc::clone(&result);
         let d = Arc::clone(&done);
         thread_handles.push(thread::spawn(move || {
-            thread::sleep(Duration::from_secs(5));
             queue_worker(q, d);
         }));
     }
@@ -35,23 +36,24 @@ fn main() -> io::Result<()> {
         .filter(|e| !e.as_path().is_dir())
         .for_each(|e| process_image(e, Arc::clone(&result)));
 
-    //done.deref().borrow_mut().deref() = true;
+    done.store(true, Ordering::Relaxed);
     for t in thread_handles {
-        t.join();
+        t.join().unwrap_or(());
     }
 
     let data = result.lock().unwrap();
-    println!("Result images has size {}. Writing to out.ppm...", data.len());
+    let raw_image = data.first().unwrap();
+    println!("Result images has size {}. Writing to out.ppm...", raw_image.len());
 
-    write_ppm(data.first().unwrap());
+    write_ppm(raw_image);
     Ok(())
 }
 
-fn queue_worker(queue: Arc<Mutex<Vec<Vec<u16>>>>, done: Arc<Box<bool>>) {
+fn queue_worker(queue: Arc<Mutex<Vec<Vec<u16>>>>, done: Arc<AtomicBool>) {
     loop {
         let mut q = queue.lock().unwrap();
         if q.len() <= 1 {
-            if **done { return }
+            if done.load(Ordering::Relaxed) { return }
             else {
                 // Queue is empty but work is not done yet => Wait.
                 drop(q);
@@ -64,7 +66,7 @@ fn queue_worker(queue: Arc<Mutex<Vec<Vec<u16>>>>, done: Arc<Box<bool>>) {
         let v2 = q.pop().unwrap();
         drop(q);
 
-        let res = v1.par_iter().zip(v2).map(|(x, y)| *max(x, &y)).collect();
+        let res = v1.iter().zip(v2).map(|(x, y)| *max(x, &y)).collect();
         queue.lock().unwrap().push(res);
     }
 }
@@ -80,8 +82,8 @@ fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<Vec<u16>>>>) {
 }
 
 fn write_ppm(data: &Vec<u16>) {
-    //let width = 5568; let height = 3708;
-    let width = 4312; let height = 2876;
+    let width = 5568; let height = 3708;
+    //let width = 4312; let height = 2876;
     // Write out the image as a grayscale PPM
     let mut f = BufWriter::new(File::create("out.ppm").unwrap());
     let preamble = format!("P6 {} {} {}\n", width, height, 65535).into_bytes();
