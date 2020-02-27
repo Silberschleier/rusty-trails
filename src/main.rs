@@ -7,39 +7,61 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufWriter;
 use rayon::prelude::*;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 
 fn main() -> io::Result<()> {
     let num_threads = num_cpus::get();
-    println!("System has {} logical cores. Using the same number of worker threads", num_threads);
+    println!("System has {} cores and {} threads. Using {} worker threads.", num_cpus::get_physical(), num_threads, num_threads);
 
     let mut entries = fs::read_dir("./Lapse_001")?
         .map(|res| res.map(|e| e.path()))
         .collect::<Result<Vec<_>, io::Error>>()?;
 
-    println!("Found {} files in target folder. Reading...", entries.len());
+    println!("Processing {} files in target folder.", entries.len());
 
     let result = Arc::new(Mutex::new(vec![]));
     let done = Arc::new(AtomicBool::new(false));
     let mut thread_handles = vec![];
 
+    // Setup CLI progressbar
+    let m = MultiProgress::new();
+    let sty = ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} {msg}")
+        .progress_chars("##-");
+    let pb_decode = Arc::new(Mutex::new(m.add(ProgressBar::new(entries.len() as u64))));
+    let pb_blend = Arc::new(Mutex::new(m.add(ProgressBar::new(entries.len() as u64))));
+    pb_decode.lock().unwrap().set_style(sty.clone());
+    pb_decode.lock().unwrap().set_message("Decode files");
+    pb_blend.lock().unwrap().set_style(sty.clone());
+    pb_blend.lock().unwrap().set_message("Blend images");
+
+    let pb_thread = thread::spawn( move || {
+        m.join().unwrap();
+    });
+
+
     for _ in 0..num_threads {
         let q = Arc::clone(&result);
         let d = Arc::clone(&done);
+        let pb = Arc::clone(&pb_blend);
         thread_handles.push(thread::spawn(move || {
-            queue_worker(q, d);
+            queue_worker(q, d, pb);
         }));
     }
 
     entries.sort();
     entries.par_iter()
         .filter(|e| !e.as_path().is_dir())
-        .for_each(|e| process_image(e, Arc::clone(&result)));
+        .for_each(|e| process_image(e, Arc::clone(&result), Arc::clone(&pb_decode)));
+    pb_decode.lock().unwrap().finish();
 
     done.store(true, Ordering::Relaxed);
     for t in thread_handles {
         t.join().unwrap_or(());
     }
+    pb_blend.lock().unwrap().finish();
+    pb_thread.join().unwrap_or(());
 
     let data = result.lock().unwrap();
     let raw_image = data.first().unwrap();
@@ -49,7 +71,7 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn queue_worker(queue: Arc<Mutex<Vec<Vec<u16>>>>, done: Arc<AtomicBool>) {
+fn queue_worker(queue: Arc<Mutex<Vec<Vec<u16>>>>, done: Arc<AtomicBool>, pb: Arc<Mutex<ProgressBar>>) {
     loop {
         let mut q = queue.lock().unwrap();
         if q.len() <= 1 {
@@ -68,14 +90,16 @@ fn queue_worker(queue: Arc<Mutex<Vec<Vec<u16>>>>, done: Arc<AtomicBool>) {
 
         let res = v1.iter().zip(v2).map(|(x, y)| *max(x, &y)).collect();
         queue.lock().unwrap().push(res);
+        pb.lock().unwrap().inc(1);
     }
 }
 
-fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<Vec<u16>>>>) {
+fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<Vec<u16>>>>, pb: Arc<Mutex<ProgressBar>>) {
     let image = rawloader::decode_file(entry.as_path()).unwrap();
     if let rawloader::RawImageData::Integer(data) = image.data {
         queue.lock().unwrap().push(data);
-        println!("{}: {} {}, width: {}\t height {}", entry.display(), image.clean_make, image.clean_model, image.width, image.height);
+        pb.lock().unwrap().inc(1);
+        //println!("{}: {} {}, width: {}\t height {}", entry.display(), image.clean_make, image.clean_model, image.width, image.height);
     } else {
         eprintln!("Image {} is in non-integer format.", entry.display());
     }
