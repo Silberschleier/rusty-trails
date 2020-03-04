@@ -10,11 +10,13 @@ fn main()
     println!("cargo:rustc-link-search=native={}/build/libdng/", dst_dngwriter.display());
     println!("cargo:rustc-link-search=native={}/build/libdng/dng-sdk/", dst_dngwriter.display());
     println!("cargo:rustc-link-search=native={}/build/libdng/xmp-sdk/", dst_dngwriter.display());
+    println!("cargo:rustc-link-search=native={}/build/libdng/md5/", dst_dngwriter.display());
 
     println!("cargo:rustc-link-lib=static=raw2dng");
     println!("cargo:rustc-link-lib=static=dng");
     println!("cargo:rustc-link-lib=static=dng-sdk");
     println!("cargo:rustc-link-lib=static=xmp-sdk");
+    println!("cargo:rustc-link-lib=static=md5");
 
 
     let target  = env::var("TARGET").unwrap();
@@ -28,6 +30,8 @@ fn main()
         println!("cargo:rustc-link-lib=dylib=jpeg");
         println!("cargo:rustc-link-lib=dylib=expat");
         println!("cargo:rustc-link-lib=dylib=z");
+        println!("cargo:rustc-link-lib=dylib=exiv2");
+        println!("cargo:rustc-link-lib=dylib=raw");
     }
     else
     {

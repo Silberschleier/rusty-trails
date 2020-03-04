@@ -4,9 +4,6 @@ use std::cmp::max;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::fs::File;
-use std::io::prelude::*;
-use std::io::BufWriter;
 use rayon::prelude::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
@@ -21,7 +18,7 @@ fn main() -> io::Result<()> {
     let num_threads = num_cpus::get();
     println!("System has {} cores and {} threads. Using {} worker threads.", num_cpus::get_physical(), num_threads, num_threads);
 
-    let mut entries = fs::read_dir("./Lapse_001")?
+    let mut entries = fs::read_dir("./Lapse_002")?
         .map(|res| res.map(|e| e.path()))
         .collect::<Result<Vec<_>, io::Error>>()?;
 
@@ -70,8 +67,8 @@ fn main() -> io::Result<()> {
     pb_blend.lock().unwrap().finish();
     pb_thread.join().unwrap_or(());
 
-    let data = result.lock().unwrap();
-    let raw_image = data.first().unwrap();
+    let mut data = result.lock().unwrap();
+    let raw_image = data.pop().unwrap();
     println!("Result images has size {}. Writing to out.ppm...", raw_image.len());
 
     write_dng(raw_image);
@@ -112,25 +109,9 @@ fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<Vec<u16>>>>, pb: Arc<Mute
     }
 }
 
-fn write_ppm(data: &Vec<u16>) {
-    let width = 5568; let height = 3708;
-    //let width = 4312; let height = 2876;
-    // Write out the image as a grayscale PPM
-    let mut f = BufWriter::new(File::create("out.ppm").unwrap());
-    let preamble = format!("P6 {} {} {}\n", width, height, 65535).into_bytes();
-    f.write_all(&preamble).unwrap();
-
-    for pix in data {
-        // Do an extremely crude "demosaic" by setting R=G=B
-        let pixhigh = (pix>>8) as u8;
-        let pixlow  = (pix&0x0f) as u8;
-        f.write_all(&[pixhigh, pixlow, pixhigh, pixlow, pixhigh, pixlow]).unwrap()
-    }
-}
-
-fn write_dng(data: &Vec<u16>) {
-    let (ptr, len, _cap) = data.to_vec().into_raw_parts();
-    assert_eq!(len, 5568 * 3708, "Mismatch between raw data-size and image resolution.");
+fn write_dng(data: Vec<u16>) {
+    let (ptr, _len, _cap) = data.into_raw_parts();
+    //assert_eq!(len, 5568 * 3708, "Mismatch between raw data-size and image resolution.");
 
     unsafe {
         buildDNG(ptr, 5568, 3708);
