@@ -1,3 +1,4 @@
+#![feature(vec_into_raw_parts)]
 use std::{fs, io, thread, time};
 use std::cmp::max;
 use std::path::PathBuf;
@@ -8,6 +9,12 @@ use std::io::prelude::*;
 use std::io::BufWriter;
 use rayon::prelude::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+
+extern {
+    #[link(name="dngwrite", kind="static")]
+    fn buildDNG(image_data: * mut::std::os::raw::c_ushort, width: u32, height: u32);
+}
+
 
 
 fn main() -> io::Result<()> {
@@ -67,7 +74,7 @@ fn main() -> io::Result<()> {
     let raw_image = data.first().unwrap();
     println!("Result images has size {}. Writing to out.ppm...", raw_image.len());
 
-    write_ppm(raw_image);
+    write_dng(raw_image);
     Ok(())
 }
 
@@ -118,5 +125,14 @@ fn write_ppm(data: &Vec<u16>) {
         let pixhigh = (pix>>8) as u8;
         let pixlow  = (pix&0x0f) as u8;
         f.write_all(&[pixhigh, pixlow, pixhigh, pixlow, pixhigh, pixlow]).unwrap()
+    }
+}
+
+fn write_dng(data: &Vec<u16>) {
+    let (ptr, len, _cap) = data.to_vec().into_raw_parts();
+    assert_eq!(len, 5568 * 3708, "Mismatch between raw data-size and image resolution.");
+
+    unsafe {
+        buildDNG(ptr, 5568, 3708);
     }
 }
