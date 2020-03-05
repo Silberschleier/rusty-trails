@@ -1,15 +1,16 @@
 #![feature(vec_into_raw_parts)]
 use std::{fs, io, thread, time};
-use std::cmp::max;
 use std::path::{PathBuf, Path};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::ffi::CString;
 use std::os::raw::c_char;
-use std::fs::File;
-use std::io::BufReader;
 use rayon::prelude::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use std::convert::TryInto;
+
+mod image;
+
 
 extern {
     #[link(name="dngwrite", kind="static")]
@@ -17,13 +18,12 @@ extern {
 }
 
 
-
 fn main() -> io::Result<()> {
     let num_threads = num_cpus::get();
     println!("System has {} cores and {} threads. Using {} worker threads.", num_cpus::get_physical(), num_threads, num_threads);
 
-    let out_file = Path::new("test_lapse_007.dng");
-    let mut entries = fs::read_dir("./Lapse_007")?
+    let out_file = Path::new("test_lapse_001_new.dng");
+    let mut entries = fs::read_dir("./Lapse_001")?
         .map(|res| res.map(|e| e.path()))
         .collect::<Result<Vec<_>, io::Error>>()?;
 
@@ -79,7 +79,8 @@ fn main() -> io::Result<()> {
     Ok(())
 }
 
-fn queue_worker(queue: Arc<Mutex<Vec<Vec<u16>>>>, done: Arc<AtomicBool>, pb: Arc<Mutex<ProgressBar>>) {
+
+fn queue_worker(queue: Arc<Mutex<Vec<image::Image>>>, done: Arc<AtomicBool>, pb: Arc<Mutex<ProgressBar>>) {
     loop {
         let mut q = queue.lock().unwrap();
         if q.len() <= 1 {
@@ -96,28 +97,25 @@ fn queue_worker(queue: Arc<Mutex<Vec<Vec<u16>>>>, done: Arc<AtomicBool>, pb: Arc
         let v2 = q.pop().unwrap();
         drop(q);
 
-        let res = v1.iter().zip(v2).map(|(x, y)| *max(x, &y)).collect();
+        let res = v1.merge(v2);
         queue.lock().unwrap().push(res);
         pb.lock().unwrap().inc(1);
     }
 }
 
-fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<Vec<u16>>>>, pb: Arc<Mutex<ProgressBar>>) {
-    let image = rawloader::decode_file(entry.as_path()).unwrap();
-    if let rawloader::RawImageData::Integer(data) = image.data {
-        queue.lock().unwrap().push(data);
-        pb.lock().unwrap().inc(1);
-    } else {
-        eprintln!("Image {} is in non-integer format.", entry.display());
-    }
+
+fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<image::Image>>>, pb: Arc<Mutex<ProgressBar>>) {
+    let img = image::Image::load_from_raw(entry.as_path(), 1.0).unwrap();
+    queue.lock().unwrap().push(img);
+    pb.lock().unwrap().inc(1);
 }
 
-fn write_dng(data: Vec<u16>, out_file: &Path) {
-    let (ptr, len, _cap) = data.into_raw_parts();
+
+fn write_dng(img: image::Image, out_file: &Path) {
+    let (ptr, len, _cap) = img.raw_image_data.into_raw_parts();
     println!("Result images has size {}. Writing to {}...", len, out_file.display());
-    assert_eq!(len, 5568 * 3708, "Mismatch between raw data-size and image resolution.");
 
     unsafe {
-        buildDNG(ptr, 5568, 3708, CString::new(out_file.as_os_str().to_str().unwrap()).unwrap().as_ptr());
+        buildDNG(ptr, img.width.try_into().unwrap(), img.height.try_into().unwrap(), CString::new(out_file.as_os_str().to_str().unwrap()).unwrap().as_ptr());
     }
 }
