@@ -40,8 +40,7 @@ public:
    virtual void setExifFromRaw(const dng_date_time_info &dateTimeNow, const dng_string &appNameVersion);
    virtual void setXmpFromRaw(const dng_date_time_info &dateTimeNow, const dng_string &appNameVersion);
    virtual void backupProprietaryData();
-   virtual void buildDNGImage(unsigned short *rawBuffer);
-   virtual void embedOriginalRaw(const char *rawFilename);
+   virtual void buildDNGImage(unsigned short *rawBuffer, unsigned short int width, unsigned short int height);
 
 protected:
    NegativeProcessor(AutoPtr<dng_host> &host, LibRaw *rawProcessor, Exiv2::Image::AutoPtr &rawImage);

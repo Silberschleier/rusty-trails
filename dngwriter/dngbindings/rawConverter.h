@@ -34,9 +34,10 @@ public:
    virtual ~RawConverter();
 
    void openRawFile(const std::string rawFilename);
-   void buildNegative(const std::string dcpFilename, unsigned short *image_data);
-   void embedRaw(const std::string rawFilename);
-   void renderImage();
+   void buildNegative(const std::string dcpFilename, unsigned short *image_data, unsigned short int width,
+                      unsigned short int height);
+
+    void renderImage();
    void renderPreviews();
 
    void writeDng (const std::string outFilename);

@@ -502,17 +502,17 @@ void NegativeProcessor::setXmpFromRaw(const dng_date_time_info &dateTimeNow, con
     // Copy existing XMP-tags in raw-file to DNG
 
     AutoPtr<dng_xmp> negXmp(new dng_xmp(m_host->Allocator()));
-    for (Exiv2::XmpData::const_iterator it = m_RawXmp.begin(); it != m_RawXmp.end(); it++) {
+    for (const auto & it : m_RawXmp) {
         try {
-            negXmp->Set(Exiv2::XmpProperties::nsInfo(it->groupName())->ns_, it->tagName().c_str(), it->toString().c_str());
+            negXmp->Set(Exiv2::XmpProperties::nsInfo(it.groupName())->ns_, it.tagName().c_str(), it.toString().c_str());
         }
         catch (dng_exception& e) {
             // the above will throw an exception when trying to add XMPs with unregistered (i.e., unknown) 
             // namespaces -- we just drop them here.
             std::cerr << "Dropped XMP-entry from raw-file since namespace is unknown: "
-                         "NS: "   << Exiv2::XmpProperties::nsInfo(it->groupName())->ns_ << ", "
-                         "path: " << it->tagName().c_str() << ", "
-                         "text: " << it->toString().c_str() << "\n";
+                         "NS: "   << Exiv2::XmpProperties::nsInfo(it.groupName())->ns_ << ", "
+                         "path: " << it.tagName().c_str() << ", "
+                         "text: " << it.toString().c_str() << "\n";
         }
     }
 
@@ -575,131 +575,21 @@ dng_memory_stream* NegativeProcessor::createDNGPrivateTag() {
 }
 
 
-void NegativeProcessor::buildDNGImage(unsigned short *rawBuffer) {
-    libraw_image_sizes_t *sizes = &m_RawProcessor->imgdata.sizes;
-
-    // -----------------------------------------------------------------------------------------
-    // Select right data source from LibRaw
-
-    /*if (rawBuffer == NULL) {
-        rawBuffer = (unsigned short*) m_RawProcessor->imgdata.rawdata.raw_image;
-    }*/
-
-    uint32 inputPlanes = 1;
-
-    /*if (rawBuffer == NULL) {
-        rawBuffer = (unsigned short*) m_RawProcessor->imgdata.rawdata.color3_image;
-        inputPlanes = 3;
-    }
-    if (rawBuffer == NULL) {
-        rawBuffer = (unsigned short*) m_RawProcessor->imgdata.rawdata.color4_image;
-        inputPlanes = 4;
-    }*/
-
-    uint32 outputPlanes = (inputPlanes == 1) ? 1 : m_RawProcessor->imgdata.idata.colors;
+void NegativeProcessor::buildDNGImage(unsigned short *rawBuffer, unsigned short int width, unsigned short int height) {
+    uint32 outputPlanes = 1;
 
     // -----------------------------------------------------------------------------------------
     // Create new dng_image and copy data
 
-    dng_rect bounds = dng_rect(sizes->raw_height, sizes->raw_width);
-    dng_simple_image *image = new dng_simple_image(bounds, outputPlanes, ttShort, m_host->Allocator());
+    dng_rect bounds = dng_rect(height, width);
+    auto image = new dng_simple_image(bounds, outputPlanes, ttShort, m_host->Allocator());
 
     dng_pixel_buffer buffer; image->GetPixelBuffer(buffer);
-    unsigned short *imageBuffer = (unsigned short*)buffer.fData;
-
-    if (inputPlanes == outputPlanes)
-        memcpy(imageBuffer, rawBuffer, sizes->raw_height * sizes->raw_width * outputPlanes * sizeof(unsigned short));
-    else {
-        for (int i = 0; i < (sizes->raw_height * sizes->raw_width); i++) {
-            memcpy(imageBuffer, rawBuffer, outputPlanes * sizeof(unsigned short));
-            imageBuffer += outputPlanes;
-            rawBuffer += inputPlanes;
-        }
-    }
+    auto *imageBuffer = (unsigned short*)buffer.fData;
+    memcpy(imageBuffer, rawBuffer, height * width * sizeof(unsigned short));
 
     AutoPtr<dng_image> castImage(dynamic_cast<dng_image*>(image));
     m_negative->SetStage1Image(castImage);
-}
-
-
-void NegativeProcessor::embedOriginalRaw(const char *rawFilename) {
-    #define BLOCKSIZE 65536 // as per spec
-
-    // -----------------------------------------------------------------------------------------
-    // Open input/output streams and write header with empty indices
-
-    dng_file_stream rawDataStream(rawFilename);
-    rawDataStream.SetReadPosition(0);
-
-    uint32 rawFileSize = static_cast<uint32>(rawDataStream.Length());
-    uint32 numberRawBlocks = static_cast<uint32>(floor((rawFileSize + 65535.0) / 65536.0));
-
-    dng_memory_stream embeddedRawStream(m_host->Allocator());
-    embeddedRawStream.SetBigEndian(true);
-    embeddedRawStream.Put_uint32(rawFileSize);
-    for (uint32 block = 0; block < numberRawBlocks; block++) 
-        embeddedRawStream.Put_uint32(0);  // indices for the block-offsets
-    embeddedRawStream.Put_uint32(0);  // index to next data fork
-
-    uint32 indexOffset = 1 * sizeof(uint32);
-    uint32 dataOffset = (numberRawBlocks + 1 + 1) * sizeof(uint32);
-
-    for (uint32 block = 0; block < numberRawBlocks; block++) {
-
-        // -----------------------------------------------------------------------------------------
-        // Read and compress one 64k block of data
-
-        z_stream zstrm;
-        zstrm.zalloc = Z_NULL;
-        zstrm.zfree = Z_NULL;
-        zstrm.opaque = Z_NULL;
-        if (deflateInit(&zstrm, Z_DEFAULT_COMPRESSION) != Z_OK) 
-            throw std::runtime_error("Error initialising ZLib for embedding raw file!");
-
-        unsigned char inBuffer[BLOCKSIZE], outBuffer[BLOCKSIZE * 2];
-        uint32 currentRawBlockLength = 
-            static_cast<uint32>(std::min(static_cast<uint64>(BLOCKSIZE), rawFileSize - rawDataStream.Position()));
-        rawDataStream.Get(inBuffer, currentRawBlockLength);
-        zstrm.avail_in = currentRawBlockLength;
-        zstrm.next_in = inBuffer;
-        zstrm.avail_out = BLOCKSIZE * 2;
-        zstrm.next_out = outBuffer;
-        if (deflate(&zstrm, Z_FINISH) != Z_STREAM_END)
-            throw std::runtime_error("Error compressing chunk for embedding raw file!");
-
-        uint32 compressedBlockLength = zstrm.total_out;
-        deflateEnd(&zstrm);
-
-        // -----------------------------------------------------------------------------------------
-        // Write index and data
-
-        embeddedRawStream.SetWritePosition(indexOffset);
-        embeddedRawStream.Put_uint32(dataOffset);
-        indexOffset += sizeof(uint32);
-
-        embeddedRawStream.SetWritePosition(dataOffset);
-        embeddedRawStream.Put(outBuffer, compressedBlockLength);
-        dataOffset += compressedBlockLength;
-    }
-
-    embeddedRawStream.SetWritePosition(indexOffset);
-    embeddedRawStream.Put_uint32(dataOffset);
-
-    // -----------------------------------------------------------------------------------------
-    // Write 7 "Mac OS forks" as per spec - empty for us
-
-    embeddedRawStream.SetWritePosition(dataOffset);
-    embeddedRawStream.Put_uint32(0);
-    embeddedRawStream.Put_uint32(0);
-    embeddedRawStream.Put_uint32(0);
-    embeddedRawStream.Put_uint32(0);
-    embeddedRawStream.Put_uint32(0);
-    embeddedRawStream.Put_uint32(0);
-    embeddedRawStream.Put_uint32(0);
-
-    AutoPtr<dng_memory_block> block(embeddedRawStream.AsMemoryBlock(m_host->Allocator()));
-    m_negative->SetOriginalRawFileData(block);
-    m_negative->FindOriginalRawFileDigest();
 }
 
 

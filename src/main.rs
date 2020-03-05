@@ -1,15 +1,19 @@
 #![feature(vec_into_raw_parts)]
 use std::{fs, io, thread, time};
 use std::cmp::max;
-use std::path::PathBuf;
+use std::path::{PathBuf, Path};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::ffi::CString;
+use std::os::raw::c_char;
+use std::fs::File;
+use std::io::BufReader;
 use rayon::prelude::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 
 extern {
     #[link(name="dngwrite", kind="static")]
-    fn buildDNG(image_data: * mut::std::os::raw::c_ushort, width: u32, height: u32);
+    fn buildDNG(image_data: * mut::std::os::raw::c_ushort, width: u32, height: u32, out_file: *const c_char);
 }
 
 
@@ -18,7 +22,8 @@ fn main() -> io::Result<()> {
     let num_threads = num_cpus::get();
     println!("System has {} cores and {} threads. Using {} worker threads.", num_cpus::get_physical(), num_threads, num_threads);
 
-    let mut entries = fs::read_dir("./Lapse_002")?
+    let out_file = Path::new("test_lapse_007.dng");
+    let mut entries = fs::read_dir("./Lapse_007")?
         .map(|res| res.map(|e| e.path()))
         .collect::<Result<Vec<_>, io::Error>>()?;
 
@@ -37,7 +42,7 @@ fn main() -> io::Result<()> {
     let pb_blend = Arc::new(Mutex::new(m.add(ProgressBar::new(entries.len() as u64))));
     pb_decode.lock().unwrap().set_style(sty.clone());
     pb_decode.lock().unwrap().set_message("Decode files");
-    pb_blend.lock().unwrap().set_style(sty.clone());
+    pb_blend.lock().unwrap().set_style(sty);
     pb_blend.lock().unwrap().set_message("Blend images");
 
     let pb_thread = thread::spawn( move || {
@@ -69,9 +74,8 @@ fn main() -> io::Result<()> {
 
     let mut data = result.lock().unwrap();
     let raw_image = data.pop().unwrap();
-    println!("Result images has size {}. Writing to out.ppm...", raw_image.len());
 
-    write_dng(raw_image);
+    write_dng(raw_image, out_file);
     Ok(())
 }
 
@@ -103,17 +107,17 @@ fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<Vec<u16>>>>, pb: Arc<Mute
     if let rawloader::RawImageData::Integer(data) = image.data {
         queue.lock().unwrap().push(data);
         pb.lock().unwrap().inc(1);
-        //println!("{}: {} {}, width: {}\t height {}", entry.display(), image.clean_make, image.clean_model, image.width, image.height);
     } else {
         eprintln!("Image {} is in non-integer format.", entry.display());
     }
 }
 
-fn write_dng(data: Vec<u16>) {
-    let (ptr, _len, _cap) = data.into_raw_parts();
-    //assert_eq!(len, 5568 * 3708, "Mismatch between raw data-size and image resolution.");
+fn write_dng(data: Vec<u16>, out_file: &Path) {
+    let (ptr, len, _cap) = data.into_raw_parts();
+    println!("Result images has size {}. Writing to {}...", len, out_file.display());
+    assert_eq!(len, 5568 * 3708, "Mismatch between raw data-size and image resolution.");
 
     unsafe {
-        buildDNG(ptr, 5568, 3708);
+        buildDNG(ptr, 5568, 3708, CString::new(out_file.as_os_str().to_str().unwrap()).unwrap().as_ptr());
     }
 }

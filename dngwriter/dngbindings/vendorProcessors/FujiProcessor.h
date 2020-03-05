@@ -28,7 +28,7 @@ friend class NegativeProcessor;
 
 public:
    void setDNGPropertiesFromRaw();
-   void buildDNGImage(unsigned short *image_data);
+   void buildDNGImage(unsigned short *image_data, unsigned short int width, unsigned short int height);
 
 protected:
    FujiProcessor(AutoPtr<dng_host> &host, LibRaw *rawProcessor, Exiv2::Image::AutoPtr &rawImage);

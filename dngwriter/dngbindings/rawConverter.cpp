@@ -88,7 +88,8 @@ void RawConverter::openRawFile(const std::string rawFilename) {
 }
 
 
-void RawConverter::buildNegative(const std::string dcpFilename, unsigned short *image_data) {
+void RawConverter::buildNegative(const std::string dcpFilename, unsigned short *image_data, unsigned short int width,
+                                 unsigned short int height) {
     // -----------------------------------------------------------------------------------------
     // Set all metadata and properties
 
@@ -110,13 +111,7 @@ void RawConverter::buildNegative(const std::string dcpFilename, unsigned short *
 
     if (m_publishFunction != NULL) m_publishFunction("reading raw image data");
 
-    m_negProcessor->buildDNGImage(image_data);
-}
-
-
-void RawConverter::embedRaw(const std::string rawFilename) {
-    if (m_publishFunction != NULL) m_publishFunction("embedding raw file");
-    m_negProcessor->embedOriginalRaw(rawFilename.c_str());
+    m_negProcessor->buildDNGImage(image_data, width, height);
 }
 
 

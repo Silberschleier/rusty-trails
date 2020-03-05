@@ -71,8 +71,8 @@ void FujiProcessor::setDNGPropertiesFromRaw() {
 }
 
 
-void FujiProcessor::buildDNGImage(unsigned short *image_data) {
-    NegativeProcessor::buildDNGImage(nullptr);
+void FujiProcessor::buildDNGImage(unsigned short *image_data, unsigned short int width, unsigned short int height) {
+    NegativeProcessor::buildDNGImage(nullptr, 0, 0);
 
 // TODO: FIXME
 /*    if (m_fujiRotate90) {
