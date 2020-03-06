@@ -11,7 +11,6 @@ pub struct Image {
     exif: Arc<Mutex<exif::Exif>>,
     pub height: usize,
     pub width: usize,
-    intensity: f32
 }
 
 
@@ -23,11 +22,10 @@ impl Image {
         if let rawloader::RawImageData::Integer(data) = image.data {
             assert_eq!(data.len(), image.width * image.height, "Mismatch between raw data-size and image resolution.");
             Ok(Image {
-                raw_image_data: data,
+                raw_image_data: data.iter().map(|x| (*x as f32 * intensity) as u16).collect(),
                 exif: Arc::new(Mutex::new(exif)),
                 height: image.height,
                 width: image.width,
-                intensity
             })
         } else {
             unimplemented!("Can't parse RAWs with non-integer data, yet.");
@@ -45,7 +43,6 @@ impl Image {
             exif: self.exif.clone(),
             height: self.height,
             width: self.width,
-            intensity: 1.0
         }
     }
 }

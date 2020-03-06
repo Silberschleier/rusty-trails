@@ -1,5 +1,5 @@
 #![feature(vec_into_raw_parts)]
-use std::{fs, io, thread, time};
+use std::{io, thread, time};
 use std::path::{PathBuf, Path};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -8,6 +8,7 @@ use std::os::raw::c_char;
 use rayon::prelude::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::convert::TryInto;
+use glob::glob;
 
 mod image;
 
@@ -17,15 +18,28 @@ extern {
     fn buildDNG(image_data: * mut::std::os::raw::c_ushort, width: u32, height: u32, out_file: *const c_char);
 }
 
+#[derive(Copy, Clone)]
+enum CometMode {
+    Falling,
+    Raising,
+    Normal
+}
+
 
 fn main() -> io::Result<()> {
     let num_threads = num_cpus::get();
     println!("System has {} cores and {} threads. Using {} worker threads.", num_cpus::get_physical(), num_threads, num_threads);
 
-    let out_file = Path::new("test_lapse_001_new.dng");
-    let mut entries = fs::read_dir("./Lapse_001")?
-        .map(|res| res.map(|e| e.path()))
-        .collect::<Result<Vec<_>, io::Error>>()?;
+    let mode = CometMode::Normal;
+    let out_file = Path::new("test_lapse_001_comet_normal.dng");
+
+    let mut entries= vec![];
+    for entry in glob("./Lapse_001/*.CR2").expect("Failed to match glob") {
+        let e = entry.unwrap();
+        if e.is_file() {
+            entries.push(e);
+        }
+    }
 
     println!("Processing {} files in target folder.", entries.len());
 
@@ -61,8 +75,8 @@ fn main() -> io::Result<()> {
 
     entries.sort();
     entries.par_iter()
-        .filter(|e| !e.as_path().is_dir())
-        .for_each(|e| process_image(e, Arc::clone(&result), Arc::clone(&pb_decode)));
+        .zip(0..entries.len())
+        .for_each(|(e, i)| process_image(e, Arc::clone(&result), Arc::clone(&pb_decode), i, entries.len(), mode));
     pb_decode.lock().unwrap().finish();
 
     done.store(true, Ordering::Relaxed);
@@ -104,8 +118,14 @@ fn queue_worker(queue: Arc<Mutex<Vec<image::Image>>>, done: Arc<AtomicBool>, pb:
 }
 
 
-fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<image::Image>>>, pb: Arc<Mutex<ProgressBar>>) {
-    let img = image::Image::load_from_raw(entry.as_path(), 1.0).unwrap();
+fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<image::Image>>>, pb: Arc<Mutex<ProgressBar>>, index: usize, num_images: usize, mode: CometMode) {
+    let intensity = match mode {
+        CometMode::Falling => 1.0 - index as f32 / num_images as f32,
+        CometMode::Raising => index as f32 / num_images as f32,
+        CometMode::Normal => 1.0,
+    };
+
+    let img = image::Image::load_from_raw(entry.as_path(), intensity).unwrap();
     queue.lock().unwrap().push(img);
     pb.lock().unwrap().inc(1);
 }

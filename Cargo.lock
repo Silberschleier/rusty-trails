@@ -434,6 +434,7 @@ version = "0.1.0"
 dependencies = [
  "cmake",
  "console",
+ "glob",
  "indicatif",
  "kamadak-exif",
  "num_cpus",
