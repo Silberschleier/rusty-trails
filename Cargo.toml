@@ -3,6 +3,7 @@ name = "rusty-trails"
 version = "0.1.0"
 authors = ["Christopher Schmidt <christopher.schmidt@posteo.de>"]
 edition = "2018"
+build="build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -12,3 +13,11 @@ indicatif = "0.14.0"
 num_cpus = "1.12.0"
 rawloader = "0.36.2"
 rayon = "1.3.0"
+kamadak-exif = "0.5.1"
+
+[build-dependencies]
+cmake = "0.1.31"
+
+[profile.release]
+lto = "fat"
+#codegen-units = 1

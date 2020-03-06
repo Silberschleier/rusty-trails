@@ -13,8 +13,12 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Install dependencies
+      run: sudo apt install libraw-dev libexiv2-dev
+    - name: Update Rust
+      run: rustup install nightly
     - name: Build
-      run: cargo build --verbose --release
+      run: cargo +nightly build --verbose --release
     - name: Upload artifact
       uses: actions/upload-artifact@v1.0.0
       with:
