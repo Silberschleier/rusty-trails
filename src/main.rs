@@ -1,4 +1,5 @@
 #![feature(vec_into_raw_parts)]
+
 use std::{io, thread, time};
 use std::path::{PathBuf, Path};
 use std::sync::{Arc, Mutex};
@@ -15,13 +16,13 @@ mod image;
 
 
 extern {
-    #[link(name="dngwrite", kind="static")]
-    fn buildDNG(image_data: * mut::std::os::raw::c_ushort, width: u32, height: u32, out_file: *const c_char);
+    #[link(name = "dngwrite", kind = "static")]
+    fn buildDNG(image_data: *mut ::std::os::raw::c_ushort, width: u32, height: u32, out_file: *const c_char, exif_raw_file: *const c_char);
 }
 
 /// Stacks Startrails from RAW images into a RAW-DNG.
 #[derive(Clap)]
-#[clap(version = crate_version!())]
+#[clap(version = crate_version ! ())]
 struct Opts {
     /// Input file pattern. Use with quotation marks, e.g.: "directory/*.CR2"
     input: String,
@@ -29,15 +30,15 @@ struct Opts {
     #[clap(default_value = "startrails.dng")]
     output: String,
     /// Stacking mode
-    #[clap(short = "m", possible_values=&["falling", "raising", "normal"])]
-    mode: String
+    #[clap(short = "m", possible_values = & ["falling", "raising", "normal"])]
+    mode: String,
 }
 
 #[derive(Copy, Clone)]
 enum CometMode {
     Falling,
     Raising,
-    Normal
+    Normal,
 }
 
 
@@ -53,7 +54,7 @@ fn main() -> io::Result<()> {
         _ => CometMode::Normal
     };
 
-    let mut entries= vec![];
+    let mut entries = vec![];
     for entry in glob(&opts.input).expect("Failed to match glob") {
         let e = entry.unwrap();
         if e.is_file() {
@@ -79,7 +80,7 @@ fn main() -> io::Result<()> {
     pb_blend.lock().unwrap().set_style(sty);
     pb_blend.lock().unwrap().set_message("Blend images");
 
-    let pb_thread = thread::spawn( move || {
+    let pb_thread = thread::spawn(move || {
         m.join().unwrap();
     });
 
@@ -109,7 +110,7 @@ fn main() -> io::Result<()> {
     let mut data = result.lock().unwrap();
     let raw_image = data.pop().unwrap();
 
-    write_dng(raw_image, Path::new(&opts.output));
+    write_dng(raw_image, Path::new(&opts.output), Path::new(entries.first().unwrap()));
     Ok(())
 }
 
@@ -118,8 +119,7 @@ fn queue_worker(queue: Arc<Mutex<Vec<image::Image>>>, done: Arc<AtomicBool>, pb:
     loop {
         let mut q = queue.lock().unwrap();
         if q.len() <= 1 {
-            if done.load(Ordering::Relaxed) { return }
-            else {
+            if done.load(Ordering::Relaxed) { return; } else {
                 // Queue is empty but work is not done yet => Wait.
                 drop(q);
                 thread::sleep(time::Duration::from_millis(20));
@@ -151,11 +151,14 @@ fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<image::Image>>>, pb: Arc<
 }
 
 
-fn write_dng(img: image::Image, out_file: &Path) {
+fn write_dng(img: image::Image, out_file: &Path, exif_raw_file: &Path) {
     let (ptr, len, _cap) = img.raw_image_data.into_raw_parts();
-    println!("Result images has size {}. Writing to {}...", len, out_file.display());
+    println!("Result images has size {} with height {} and width {}. Writing to '{}'...", len, img.height, img.width, out_file.display());
 
     unsafe {
-        buildDNG(ptr, img.width.try_into().unwrap(), img.height.try_into().unwrap(), CString::new(out_file.as_os_str().to_str().unwrap()).unwrap().as_ptr());
+        buildDNG(ptr, img.width.try_into().unwrap(), img.height.try_into().unwrap(),
+                 CString::new(out_file.as_os_str().to_str().unwrap()).unwrap().as_ptr(),
+                 CString::new(exif_raw_file.as_os_str().to_str().unwrap()).unwrap().as_ptr()
+        );
     }
 }
