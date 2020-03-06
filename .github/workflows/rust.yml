@@ -13,6 +13,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v2
+    - name: Install dependencies
+      run: sudo apt install libraw-dev libexiv2-dev
     - name: Build
       run: cargo +beta build --verbose --release
     - name: Upload artifact
