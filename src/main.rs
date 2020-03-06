@@ -9,6 +9,7 @@ use rayon::prelude::*;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::convert::TryInto;
 use glob::glob;
+use clap::{crate_version, Clap};
 
 mod image;
 
@@ -16,6 +17,20 @@ mod image;
 extern {
     #[link(name="dngwrite", kind="static")]
     fn buildDNG(image_data: * mut::std::os::raw::c_ushort, width: u32, height: u32, out_file: *const c_char);
+}
+
+/// Stacks Startrails from RAW images into a RAW-DNG.
+#[derive(Clap)]
+#[clap(version = crate_version!())]
+struct Opts {
+    /// Input file pattern. Use with quotation marks, e.g.: "directory/*.CR2"
+    input: String,
+    /// Path of the resulting DNG
+    #[clap(default_value = "startrails.dng")]
+    output: String,
+    /// Stacking mode
+    #[clap(short = "m", possible_values=&["falling", "raising", "normal"])]
+    mode: String
 }
 
 #[derive(Copy, Clone)]
@@ -27,14 +42,19 @@ enum CometMode {
 
 
 fn main() -> io::Result<()> {
+    let opts = Opts::parse();
+
     let num_threads = num_cpus::get();
     println!("System has {} cores and {} threads. Using {} worker threads.", num_cpus::get_physical(), num_threads, num_threads);
 
-    let mode = CometMode::Normal;
-    let out_file = Path::new("test_lapse_001_comet_normal.dng");
+    let mode = match opts.mode.as_str() {
+        "falling" => CometMode::Falling,
+        "raising" => CometMode::Raising,
+        _ => CometMode::Normal
+    };
 
     let mut entries= vec![];
-    for entry in glob("./Lapse_001/*.CR2").expect("Failed to match glob") {
+    for entry in glob(&opts.input).expect("Failed to match glob") {
         let e = entry.unwrap();
         if e.is_file() {
             entries.push(e);
@@ -89,7 +109,7 @@ fn main() -> io::Result<()> {
     let mut data = result.lock().unwrap();
     let raw_image = data.pop().unwrap();
 
-    write_dng(raw_image, out_file);
+    write_dng(raw_image, Path::new(&opts.output));
     Ok(())
 }
 
