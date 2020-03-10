@@ -11,38 +11,66 @@ pub struct Image {
     exif: Arc<Mutex<exif::Exif>>,
     pub height: usize,
     pub width: usize,
+    intensity: f32
 }
 
 
 impl Image {
-    pub fn load_from_raw(path: &Path, intensity: f32) -> Result<Image, &str> {
+    pub fn load_from_raw(path: &Path, intensity: f32) -> Result<Self, &str> {
         let exif = load_exif(path).unwrap();
         let image = rawloader::decode_file(path).unwrap();
 
         if let rawloader::RawImageData::Integer(data) = image.data {
             assert_eq!(data.len(), image.width * image.height, "Mismatch between raw data-size and image resolution.");
             Ok(Image {
-                raw_image_data: data.iter().map(|x| (*x as f32 * intensity) as u16).collect(),
+                raw_image_data: data,
                 exif: Arc::new(Mutex::new(exif)),
                 height: image.height,
                 width: image.width,
+                intensity
             })
         } else {
             unimplemented!("Can't parse RAWs with non-integer data, yet.");
         }
     }
 
-    pub fn merge(&self, other: Image) -> Image {
+    pub fn apply_intensity(&self) -> Image {
+        Image {
+            raw_image_data: self.raw_image_data.iter().map(|x| (*x as f32 * self.intensity) as u16).collect(),
+            exif: self.exif.clone(),
+            height: self.height,
+            width: self.width,
+            intensity: 1.0
+        }
+    }
+
+    pub fn merge_add(&self, other: Image) -> Self {
+        let res = self.raw_image_data.iter()
+            .zip(other.raw_image_data)
+            .map(|(x, y)| *x + y)
+            .collect();
+
+        Self {
+            raw_image_data: res,
+            exif: self.exif.clone(),
+            height: self.height,
+            width: self.width,
+            intensity: 1.0
+        }
+    }
+
+    pub fn merge_max(&self, other: Image) -> Self {
         let res = self.raw_image_data.iter()
             .zip(other.raw_image_data)
             .map(|(x, y)| max(*x, y))
             .collect();
 
-        Image {
+        Self {
             raw_image_data: res,
             exif: self.exif.clone(),
             height: self.height,
             width: self.width,
+            intensity: 1.0
         }
     }
 }
