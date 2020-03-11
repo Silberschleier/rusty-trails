@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::unimplemented;
 use std::fs::File;
 use std::io::BufReader;
@@ -6,12 +6,24 @@ use std::cmp::max;
 use std::sync::{Arc, Mutex};
 
 
+pub enum ImageType {
+    Light,
+    Dark
+}
+
+pub struct ImagePrototype {
+    pub path: PathBuf,
+    pub intensity: f32,
+    pub image_type: ImageType
+}
+
 pub struct Image {
     pub raw_image_data: Vec<u16>,
     exif: Arc<Mutex<exif::Exif>>,
     pub height: usize,
     pub width: usize,
-    intensity: f32
+    intensity: f32,
+    image_type: ImageType
 }
 
 
@@ -22,25 +34,27 @@ impl Image {
 
         if let rawloader::RawImageData::Integer(data) = image.data {
             assert_eq!(data.len(), image.width * image.height, "Mismatch between raw data-size and image resolution.");
-            Ok(Image {
+            Ok(Self {
                 raw_image_data: data,
                 exif: Arc::new(Mutex::new(exif)),
                 height: image.height,
                 width: image.width,
-                intensity
+                intensity,
+                image_type: ImageType::Light
             })
         } else {
             unimplemented!("Can't parse RAWs with non-integer data, yet.");
         }
     }
 
-    pub fn apply_intensity(&self) -> Image {
-        Image {
+    pub fn apply_intensity(&self) -> Self {
+        Self {
             raw_image_data: self.raw_image_data.iter().map(|x| (*x as f32 * self.intensity) as u16).collect(),
             exif: self.exif.clone(),
             height: self.height,
             width: self.width,
-            intensity: 1.0
+            intensity: 1.0,
+            image_type: ImageType::Light
         }
     }
 
@@ -55,7 +69,8 @@ impl Image {
             exif: self.exif.clone(),
             height: self.height,
             width: self.width,
-            intensity: 1.0
+            intensity: 1.0,
+            image_type: ImageType::Light
         }
     }
 
@@ -70,7 +85,24 @@ impl Image {
             exif: self.exif.clone(),
             height: self.height,
             width: self.width,
-            intensity: 1.0
+            intensity: 1.0,
+            image_type: ImageType::Light
+        }
+    }
+
+    pub fn subtract(&self, other: Image) -> Self {
+        let res = self.raw_image_data.iter()
+            .zip(other.raw_image_data)
+            .map(|(x, y)| *x - y)
+            .collect();
+
+        Self {
+            raw_image_data: res,
+            exif: self.exif.clone(),
+            height: self.height,
+            width: self.width,
+            intensity: 1.0,
+            image_type: ImageType::Light
         }
     }
 }

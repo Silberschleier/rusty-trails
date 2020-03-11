@@ -10,6 +10,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::convert::TryInto;
 use glob::glob;
 use clap::{crate_version, Clap};
+use crate::image::ImagePrototype;
 
 mod image;
 mod merger;
@@ -57,39 +58,73 @@ fn main() -> io::Result<()> {
         _ => CometMode::Normal
     };
 
-    let mut darks = match_files(opts.darks);
+    let darks = match_files(opts.darks);
     let mut lights = match_files(opts.input);
-    println!("Processing {} files in target folder.", lights.len());
+    println!("Light frames: {},  Dark frames: {},  Mode: {}", lights.len(), darks.len(), opts.mode);
 
     // Setup CLI progressbar
     let m = MultiProgress::new();
-    let sty = ProgressStyle::default_bar()
+    let sty_load = ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] [{bar:40.green/cyan}] {pos:>7}/{len:7} {msg}")
+        .progress_chars("##-");
+    let sty_blend = ProgressStyle::default_bar()
         .template("[{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} {msg}")
         .progress_chars("##-");
-    let pb_decode = Arc::new(Mutex::new(m.add(ProgressBar::new(lights.len() as u64))));
-    let pb_blend = m.add(ProgressBar::new(lights.len() as u64));
-    pb_decode.lock().unwrap().set_style(sty.clone());
+    let pb_decode = Arc::new(Mutex::new(m.add(ProgressBar::new((lights.len() + darks.len() - 1) as u64))));
+    let pb_blend_lights = m.add(ProgressBar::new(lights.len() as u64 - 1));
+    let pb_blend_darks = m.add(ProgressBar::new(darks.len() as u64));
+    pb_decode.lock().unwrap().set_style(sty_load);
     pb_decode.lock().unwrap().set_message("Decode files");
-    pb_blend.set_style(sty);
-    pb_blend.set_message("Blend images");
+    pb_blend_lights.set_style(sty_blend.clone());
+    pb_blend_darks.set_style(sty_blend);
+    pb_blend_lights.set_message("Blend Lights");
+    pb_blend_darks.set_message("Blend Darks");
 
     let pb_thread = thread::spawn(move || {
         m.join().unwrap();
     });
 
-    // Load and blend light frames
-    let mut light_merger = merger::Merger::new(merger::MergeAction::Max, pb_blend);
+    // Prepare mergers
+    let mut light_merger = merger::Merger::new(merger::MergeAction::Max, pb_blend_lights);
+    let mut dark_merger = merger::Merger::new(merger::MergeAction::Add, pb_blend_darks);
     light_merger.spawn_workers(num_threads);
+    dark_merger.spawn_workers(num_threads);
 
+
+    // Load darks
+    darks.par_iter()
+        .map(|p| ImagePrototype {
+            path: PathBuf::from(p),
+            intensity: 1.0 / darks.len() as f32,
+            image_type: image::ImageType::Dark
+        })
+        .for_each(|p| load_image(&p, dark_merger.get_queue(), Arc::clone(&pb_decode)));
+
+    dark_merger.finish();
+
+
+    // Load lights
     lights.sort();
     lights.par_iter()
         .zip(0..lights.len())
-        .for_each(|(e, i)| process_image(e, light_merger.get_queue(), Arc::clone(&pb_decode), i, lights.len(), mode));
+        .map(|(p, i)| ImagePrototype {
+            path: PathBuf::from(p),
+            intensity: determine_intensity(mode, i, lights.len()),
+            image_type: image::ImageType::Light
+        })
+        .for_each(|p| load_image(&p, light_merger.get_queue(), Arc::clone(&pb_decode)));
+
+
     pb_decode.lock().unwrap().finish();
 
-    let raw_image = light_merger.finish_and_join();
+    let master_dark = dark_merger.finish_and_join();
+    let merged_light = light_merger.finish_and_join().unwrap();
     pb_thread.join().unwrap_or(());
 
+    let raw_image = match master_dark {
+        Some(dark) => { println!("Subtracting master dark."); merged_light.subtract(dark)},
+        None => merged_light
+    };
 
     write_dng(raw_image, Path::new(&opts.output), Path::new(lights.first().unwrap()));
     Ok(())
@@ -108,19 +143,19 @@ fn match_files(pattern: String) -> Vec<PathBuf> {
     entries
 }
 
-
-fn process_image(entry: &PathBuf, queue: Arc<Mutex<Vec<image::Image>>>, pb: Arc<Mutex<ProgressBar>>, index: usize, num_images: usize, mode: CometMode) {
-    let intensity = match mode {
+fn determine_intensity(mode: CometMode, index: usize, num_images: usize) -> f32 {
+    match mode {
         CometMode::Falling => 1.0 - index as f32 / num_images as f32,
         CometMode::Raising => index as f32 / num_images as f32,
         CometMode::Normal => 1.0,
-    };
+    }
+}
 
-    let img = image::Image::load_from_raw(entry.as_path(), intensity).unwrap().apply_intensity();
+fn load_image(proto: &ImagePrototype, queue: Arc<Mutex<Vec<image::Image>>>, pb: Arc<Mutex<ProgressBar>>) {
+    let img = image::Image::load_from_raw(proto.path.as_path(), proto.intensity).unwrap().apply_intensity();
     queue.lock().unwrap().push(img);
     pb.lock().unwrap().inc(1);
 }
-
 
 fn write_dng(img: image::Image, out_file: &Path, exif_raw_file: &Path) {
     let (ptr, len, _cap) = img.raw_image_data.into_raw_parts();

@@ -52,7 +52,7 @@ impl Merger {
         self.done.store(true, Ordering::Relaxed);
     }
 
-    pub fn finish_and_join(self) -> Image {
+    pub fn finish_and_join(self) -> Option<Image> {
         self.finish();
 
         for t in self.threads {
@@ -60,7 +60,7 @@ impl Merger {
         }
 
         self.progress_bar.lock().unwrap().finish();
-        self.queue.lock().unwrap().pop().unwrap()
+        self.queue.lock().unwrap().pop()
     }
 }
 
