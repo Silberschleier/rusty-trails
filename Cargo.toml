@@ -9,7 +9,7 @@ build="build.rs"
 
 [dependencies]
 clap = { git = "https://github.com/clap-rs/clap/" }
-console = "0.11.2"
+console = "0.11.3"
 glob = "0.3.0"
 indicatif = "0.14.0"
 kamadak-exif = "0.5.1"
