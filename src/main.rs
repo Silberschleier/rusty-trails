@@ -30,7 +30,7 @@ struct Opts {
     #[clap(default_value = "startrails.dng")]
     output: String,
     /// Stacking mode
-    #[clap(short = "m", possible_values = & ["falling", "raising", "normal"])]
+    #[clap(short = 'm', possible_values = & ["falling", "raising", "normal"])]
     mode: String,
 }
 
